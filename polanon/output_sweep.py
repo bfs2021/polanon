@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from polanon._detection import detect
-from polanon._matching import Haystack, known_value_ranges
+from polanon._matching import Haystack, known_value_matches
 from polanon._view import detection_view
 from polanon.allowlist import Allowlist
 from polanon.guards.base import Guard
@@ -52,6 +52,10 @@ def sweep(
     new whenever a guard read it with a trailing full stop, read part of it, or read two known
     values as one name.
 
+    A known value with letters glued to it counts as known too. Polish inflects a name in a
+    sentence, so a restored answer says "Jan Kowalskiego" where the mapping holds "Jan Kowalski";
+    the letters the token took on are not personal data the model invented.
+
     The answer is read the way :func:`~polanon.anonymize` reads a text: a PESEL with a zero-width
     space in it is still a PESEL, and a known name spelled in capitals or with a no-break space is
     still known.
@@ -62,7 +66,12 @@ def sweep(
     known = [(value, token) for token, value in mapping.items() if value != token]
     covered = bytearray(len(restored_text))
     ranges = [match.span() for match in tokens]
-    ranges += known_value_ranges(restored_text, Haystack.of(restored_text, view), known)
+    ranges += [
+        (start, end)
+        for start, end, _ in known_value_matches(
+            restored_text, Haystack.of(restored_text, view), known, ranges, absorb=True
+        )
+    ]
     for start, end in ranges:
         covered[start:end] = b"\x01" * (end - start)
     detected = detect(restored_text, view, enabled, list(guards))

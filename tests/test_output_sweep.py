@@ -70,3 +70,21 @@ def test_new_identifier_hidden_by_an_invisible_character_is_reported():
 def test_known_name_spelled_differently_is_not_reported_as_new(name):
     report = sweep(f"Odpowiedz {name}.", {"<OSOBA_1>": "Jan Kowalski"}, NAME_GUARDS, ALL)
     assert report.is_clean
+
+
+def test_known_name_with_a_glued_ending_is_not_reported_as_new():
+    """A restored token takes the Polish ending the model put after it: the ending is the same
+    person, not personal data the model invented."""
+    report = sweep(
+        "Odpowiedź dla Jan Kowalskia. Przekażę Jan Kowalskiowi.",
+        {"<OSOBA_1>": "Jan Kowalski"},
+        NAME_GUARDS,
+        ALL,
+    )
+    assert report.new_spans == []
+
+
+def test_a_different_name_beside_an_inflected_known_one_is_still_reported():
+    text = "Odpowiedź dla Jan Kowalskia. Pozdrawia Anna Nowak."
+    report = sweep(text, {"<OSOBA_1>": "Jan Kowalski"}, NAME_GUARDS, ALL)
+    assert [text[span.start : span.end] for span in report.new_spans] == ["Anna Nowak"]
