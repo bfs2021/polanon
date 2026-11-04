@@ -88,3 +88,38 @@ def test_a_different_name_beside_an_inflected_known_one_is_still_reported():
     text = "Odpowiedź dla Jan Kowalskia. Pozdrawia Anna Nowak."
     report = sweep(text, {"<OSOBA_1>": "Jan Kowalski"}, NAME_GUARDS, ALL)
     assert [text[span.start : span.end] for span in report.new_spans] == ["Anna Nowak"]
+
+
+def test_a_known_name_grown_into_a_longer_one_is_still_reported():
+    """Letters glued on the right that do not spell a case ending are new data: a longer surname
+    built on the same stem as a known one is not the same person."""
+    for known, answer in [
+        ("Jan Nowak", "Panie Jan Nowakowski, dzieki."),
+        ("Jan Kowal", "Panie Jan Kowalczyk, dzieki."),
+        ("Ewa Lis", "Pani Ewa Lisowska, dzieki."),
+    ]:
+        report = sweep(answer, {"<OSOBA_1>": known}, NAME_GUARDS, ALL)
+        assert report.new_spans, f"{known} inside {answer!r} went unreported"
+
+
+def test_letters_glued_on_the_left_of_a_known_name_are_still_reported():
+    report = sweep("Pani Joanna Nowak odpisała.", {"<OSOBA_1>": "Anna Nowak"}, NAME_GUARDS, ALL)
+    assert report.new_spans
+
+
+def test_a_known_phone_number_inside_a_new_pesel_is_still_reported():
+    """The extension never crosses digits: the PESEL keeps its first and last digit uncovered."""
+    report = sweep("PESEL 50810112354.", {"<TELEFON_1>": "810112354"}, GUARDS, ALL)
+    assert [span.entity_type for span in report.new_spans] == ["PESEL"]
+
+
+def test_overlapping_known_values_stay_clean():
+    mapping = {"<OSOBA_1>": "Jan Kowalski", "<FIRMA_1>": "Kowalski Sp. z o.o."}
+    report = sweep("Zgloszenie przyjala firma Jan Kowalski Sp. z o.o.", mapping, NAME_GUARDS, ALL)
+    assert report.is_clean
+
+
+def test_a_short_known_name_with_a_glued_ending_is_not_reported_as_new():
+    """An ending glued right onto a short known value covers the word: "Jan" restored as "Jana"."""
+    report = sweep("Wiadomość od Jana.", {"<OSOBA_1>": "Jan"}, NAME_GUARDS, ALL)
+    assert report.new_spans == []

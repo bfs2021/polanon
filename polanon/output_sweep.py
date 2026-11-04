@@ -12,14 +12,34 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from polanon._detection import detect
-from polanon._matching import Haystack, known_value_matches
+from polanon._matching import Haystack, fold, known_value_ranges
 from polanon._view import detection_view
-from polanon.allowlist import Allowlist
+from polanon.allowlist import _ATTACHED_ENDINGS, Allowlist
 from polanon.guards.base import Guard
 from polanon.policy import TOKEN_PATTERN
 from polanon.types import Span, merge_spans
 
 _TOKEN_RE = re.compile(TOKEN_PATTERN)
+
+#: Endings a restored token may take on without the answer inventing new data: the endings written
+#: straight after a name, plus the suffixed forms a longer name declines through ("Kowalskiego").
+#: Anything glued on that does not spell one of these leaves the detection reported, so a surname
+#: that merely shares a stem with a known one is still flagged.
+_SWEEP_ENDINGS = (*_ATTACHED_ENDINGS, "ego", "emu")
+
+
+def _glued_end(text: str, end: int) -> int:
+    """Return `end` moved through one case ending glued right onto a known value, else `end`.
+
+    Only the endings in :data:`_SWEEP_ENDINGS` count, matched without case: "Jan Kowalskia" extends
+    through "a", "Jan Kowalskiego" through "ego". A longer tail only takes the ending it starts
+    with, so "Kowalczyk" keeps its "czyk" and digits never match an ending at all.
+    """
+    for ending in sorted(_SWEEP_ENDINGS, key=len, reverse=True):
+        candidate = text[end : end + len(ending)]
+        if candidate and fold(candidate) == ending:
+            return end + len(ending)
+    return end
 
 
 @dataclass
@@ -52,9 +72,11 @@ def sweep(
     new whenever a guard read it with a trailing full stop, read part of it, or read two known
     values as one name.
 
-    A known value with letters glued to it counts as known too. Polish inflects a name in a
-    sentence, so a restored answer says "Jan Kowalskiego" where the mapping holds "Jan Kowalski";
-    the letters the token took on are not personal data the model invented.
+    A known value counts as known exactly as written, with the letters Polish glues onto its right
+    when they spell a case ending: a restored answer says "Jan Kowalskiego" where the mapping holds
+    "Jan Kowalski", and the ending the token took on is not personal data the model invented. The
+    extension never crosses digits and never reaches left, so a known number inside a longer one
+    and a name that starts inside another ("Joanna" beside "Anna") are still new.
 
     The answer is read the way :func:`~polanon.anonymize` reads a text: a PESEL with a zero-width
     space in it is still a PESEL, and a known name spelled in capitals or with a no-break space is
@@ -67,10 +89,8 @@ def sweep(
     covered = bytearray(len(restored_text))
     ranges = [match.span() for match in tokens]
     ranges += [
-        (start, end)
-        for start, end, _ in known_value_matches(
-            restored_text, Haystack.of(restored_text, view), known, ranges, absorb=True
-        )
+        (start, _glued_end(restored_text, end))
+        for start, end in known_value_ranges(restored_text, Haystack.of(restored_text, view), known)
     ]
     for start, end in ranges:
         covered[start:end] = b"\x01" * (end - start)
