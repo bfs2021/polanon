@@ -113,6 +113,22 @@ def test_a_known_phone_number_inside_a_new_pesel_is_still_reported():
     assert [span.entity_type for span in report.new_spans] == ["PESEL"]
 
 
+@pytest.mark.parametrize(
+    ("token", "known", "answer"),
+    [
+        ("<ADRES_1>", "ul. Długa 5", "Wysyłka na ul. Długa 5a."),
+        ("<REJESTRACJA_1>", "WPI 1234", "Auto o tablicach WPI 1234E."),
+        ("<IP_1>", "fe80::1", "Serwer to fe80::1a na lanie."),
+        ("<EMAIL_1>", "jan@firma.example", "Pisz na jan@firma.examplea."),
+    ],
+)
+def test_a_letter_glued_onto_a_non_name_known_value_is_still_reported(token, known, answer):
+    """Only names decline: a letter glued onto any other kind of known value — an address, a plate,
+    an IP address, an e-mail — changes the value, so the detection stays reported."""
+    report = sweep(answer, {token: known}, GUARDS, ALL)
+    assert report.new_spans, f"{known} with a glued letter went unreported in {answer!r}"
+
+
 def test_overlapping_known_values_stay_clean():
     mapping = {"<OSOBA_1>": "Jan Kowalski", "<FIRMA_1>": "Kowalski Sp. z o.o."}
     report = sweep("Zgloszenie przyjala firma Jan Kowalski Sp. z o.o.", mapping, NAME_GUARDS, ALL)
